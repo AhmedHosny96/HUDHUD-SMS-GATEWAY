@@ -21,7 +21,7 @@ public class MonitoringService {
 
     private final RestTemplate restTemplate;
 
-    private static final int TIME_OUT = 10000;
+    private static final int TIME_OUT = 60000;
 
     public boolean isReachableViaPing(String ipAddress) {
         try {
@@ -32,7 +32,7 @@ public class MonitoringService {
             return false;
         }
     }
-    
+
     public void sendToSlack(String message) {
         var request = new JSONObject();
         request.put("text", "<!channel> " + message);

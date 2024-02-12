@@ -3,7 +3,7 @@ package com.hudhud.service;
 import com.hudhud.exception.CustomException;
 import com.hudhud.model.Client;
 import com.hudhud.model.Sms;
-import com.hudhud.model.dto.SmsCount;
+import com.hudhud.model.SmsCount;
 import com.hudhud.repository.ClientRepository;
 import com.hudhud.repository.PackageRepository;
 import com.hudhud.repository.SmsCountRepository;
@@ -23,10 +23,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -46,6 +43,8 @@ public class SmsService {
     @Value("${sms.smpp.ipAddress}")
     private String IPADDRESS;
 
+    private final ClientService clientService;
+
 
     static String SHEET = "Sheet1";
     public static String TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -62,15 +61,15 @@ public class SmsService {
 
     private final PackageRepository packageRepository;
 
+    private final String[] whiteListedClients = {"phuAgjlu", "mPReYLee", ""};
+
     // TODO : FORWARD SMS TO KANNEL GATEWAY
     public CompletableFuture<Integer> sendSmsAsync(String username, String destination, String message) {
 
         boolean reachableViaPing = monitoringService.isReachableViaPing(IPADDRESS);
 
 //        if (reachableViaPing)
-
         log.info("SMS-KANNEL REACHABLE : {}", reachableViaPing);
-
         if (!reachableViaPing) {
             // Notify Slack
             monitoringService.sendToSlack(":warning: SMS KANNEL NETWORK IS UNREACHABLE");
@@ -82,6 +81,21 @@ public class SmsService {
         Client client = clientRepository.findClientByUsername(username).get();
         String from = client.getSenderId();
 
+        // count
+        if (Arrays.asList(whiteListedClients).contains(username)) {
+            // increment count for that client
+            incrementCountForClient(client.getId());
+            log.info("CLIENT COUNT INCREMENTED : {}", client.getId());
+        } else {
+            var sms = new Sms();
+            sms.setClientId(String.valueOf(client.getId()));
+            sms.setDate(LocalDateTime.now());
+            sms.setReceiverAddress(destination);
+            sms.setMessage(message);
+            sms.setSent(1);
+            clientService.saveSMS(sms);
+        }
+        // save
         return CompletableFuture.supplyAsync(() -> {
             try {
                 // Replace spaces in message with %20
@@ -94,6 +108,7 @@ public class SmsService {
                         "&to=" + destination +
                         "&text=" + encodedMessage;
 
+
                 String endpoint = URL + "?" + params;
 
                 HttpClient httpClient = HttpClient.newHttpClient();
@@ -105,7 +120,6 @@ public class SmsService {
                 log.info("SMS KANNEL RESPONSE : {}", response);
                 log.info("Response Code: {}", response.statusCode());
 
-
                 return response.statusCode();
             } catch (Exception e) {
                 log.error("Failed to send SMS: {}", e.getMessage(), e);
@@ -114,12 +128,31 @@ public class SmsService {
         }, executorService);
     }
 
+    // increment client sms
+    private void incrementCountForClient(Long clientId) {
+        // Assuming you have a method to save/update the SMS count for the client
+        SmsCount smsCount = smsCountRepository.findByClientId(clientId);
+        if (smsCount == null) {
+            // If no record exists, create a new one
+            smsCount = new SmsCount();
+            smsCount.setClientId(clientId);
+            smsCount.setCreatedAt(LocalDateTime.now());
+            smsCount.setUpdatedAt(LocalDateTime.now());
+            smsCount.setCount(1L); // Initialize count to 1
+        } else {
+            // If a record exists, increment the count
+            smsCount.setUpdatedAt(LocalDateTime.now());
+            smsCount.setCount(smsCount.getCount() + 1);
+        }
+        smsCountRepository.save(smsCount);
+    }
+
     public Long getSmsCount(Long clientId, LocalDateTime startDate, LocalDateTime endDate) {
-        long result = smsRepository.countByClientIdAndDateBetween(clientId, startDate, endDate);
-
-        log.info("SMS COUNT : {}", result);
-
-        return result;
+//        long result = smsRepository.countByClientIdAndDateBetween(clientId, startDate, endDate);
+//        log.info("SMS COUNT : {}", result);
+        long smsCountByClientIdAndDateBetween = smsCountRepository.smsCountBetweenDatesForClient(clientId, startDate, endDate);
+        log.info("SMS COUNT : {}", smsCountByClientIdAndDateBetween);
+        return smsCountByClientIdAndDateBetween;
     }
 
     public List<Sms> getSmsByClientId(String clientId) throws CustomException {
@@ -135,7 +168,7 @@ public class SmsService {
     //
     public SmsCount getSmsCountById(Long clientId) throws CustomException {
         Client client = clientRepository.findById(clientId).get();
-        SmsCount byClientId = smsCountRepository.findByClient(Optional.of(client));
+        SmsCount byClientId = smsCountRepository.findByClientId(clientId);
         if (byClientId == null) {
             throw new CustomException("No sms found for this client");
         }

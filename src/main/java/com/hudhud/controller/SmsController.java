@@ -231,16 +231,23 @@ public class SmsController {
             CompletableFuture<Integer> integerCompletableFuture = smsService.sendSmsAsync(smsDTO.getUsername(), smsDTO.getReceiverAddress(), smsDTO.getMessage());
 
             var response = new JSONObject();
-            response.put("status", "200");
-            response.put("message", integerCompletableFuture.get());
 
-            var sms = new Sms();
-            sms.setClientId(client.get().getId().toString());
-            sms.setDate(LocalDateTime.now());
-            sms.setReceiverAddress(smsDTO.getReceiverAddress());
-            sms.setMessage(smsDTO.getMessage());
-            sms.setSent(1);
-            clientService.saveSMS(sms);
+            if (integerCompletableFuture.get() == 202) {
+                response.put("status", "200");
+                response.put("message", "success");
+
+            } else {
+                response.put("status", "400");
+                response.put("message", "Error occurred while sending message to gateway");
+            }
+
+//            var sms = new Sms();
+//            sms.setClientId(client.get().getId().toString());
+//            sms.setDate(LocalDateTime.now());
+//            sms.setReceiverAddress(smsDTO.getReceiverAddress());
+//            sms.setMessage(smsDTO.getMessage());
+//            sms.setSent(1);
+//            clientService.saveSMS(sms);
 
             return new ResponseEntity<>(response.toString(), HttpStatus.OK);
         } else {

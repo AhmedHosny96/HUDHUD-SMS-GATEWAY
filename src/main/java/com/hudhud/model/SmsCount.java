@@ -1,6 +1,5 @@
-package com.hudhud.model.dto;
+package com.hudhud.model;
 
-import com.hudhud.model.Client;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -8,19 +7,19 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
+
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
+@Entity
 @Table(name = "SmsCount")
-@Entity()
 public class SmsCount {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    @ManyToOne
-    @JoinColumn(name = "clientId")
-    private Client client;
-    private LocalDateTime date;
-    private int count;
+    private Long clientId;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+    private Long count;
 }
