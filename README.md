@@ -65,8 +65,6 @@ Ensure the Kannel server is configured correctly and running on your Linux machi
 The HUDHUD SMS Gateway provides the following REST API endpoints:
 
 - **Send SMS:** `/api/sms/send`
-- **Receive Delivery Reports:** `/api/sms/dlr`
-- **Query Message Status:** `/api/sms/status`
 
 ## Usage
 
