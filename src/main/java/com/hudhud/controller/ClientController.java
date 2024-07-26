@@ -7,10 +7,13 @@ import com.hudhud.model.dto.CustomResponse;
 import com.hudhud.model.dto.StatusDTO;
 import com.hudhud.repository.ClientRepository;
 import com.hudhud.service.ClientService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -31,12 +34,19 @@ public class ClientController {
         return new ResponseEntity<>(clients, HttpStatus.OK);
     }
 
+    @GetMapping("/client/reset")
+    public ResponseEntity<?> resetClientPassword(@RequestParam() String username) {
+        CustomResponse customResponse = clientService.resetClientPassword(username);
+        return new ResponseEntity<>(customResponse, HttpStatus.OK);
+    }
+
 
     @PostMapping("client/registration")
-    public ResponseEntity<?> registerClient(@RequestBody ClientDTO clientDTO) throws Exception {
+    public ResponseEntity<?> registerClient(@RequestBody ClientDTO clientDTO, HttpServletRequest request) throws Exception {
+
         Client client = clientService.createClient(clientDTO);
         var customResponse = new CustomResponse();
-        customResponse.setStatus("200");
+        customResponse.setStatus(200);
         customResponse.setMessage("Client Registered successfully");
         return new ResponseEntity<>(customResponse, HttpStatus.OK);
     }
@@ -47,7 +57,7 @@ public class ClientController {
         log.info("STATUS :{}", statusDTO.getStatus());
         clientService.deactivateClient(clientId, statusDTO.getStatus());
         var customResponse = new CustomResponse();
-        customResponse.setStatus("200");
+        customResponse.setStatus(200);
         customResponse.setMessage("Client status changed successfully");
         return new ResponseEntity<>(customResponse, HttpStatus.OK);
     }

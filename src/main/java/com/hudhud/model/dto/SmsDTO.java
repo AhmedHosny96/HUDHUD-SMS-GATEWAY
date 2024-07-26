@@ -12,10 +12,10 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class SmsDTO {
 
-    @NotEmpty
-    private String username;
-    @NotEmpty
-    private String password;
+//    @NotEmpty
+//    private String username;
+//    @NotEmpty
+//    private String password;
     @Pattern(regexp = "^2519[0-9]{8}$", message = "Receiver address must start with 2519 and be 12 digits long.")
     @NotEmpty
     private String receiverAddress;

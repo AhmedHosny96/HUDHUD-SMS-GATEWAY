@@ -1,9 +1,9 @@
 package com.hudhud.controller;
 
+import com.hudhud.config.JwtConfig;
 import com.hudhud.exception.CustomException;
 import com.hudhud.model.Client;
 import com.hudhud.model.Sms;
-import com.hudhud.model.Packages;
 import com.hudhud.model.dto.CustomResponse;
 import com.hudhud.model.dto.SmsDTO;
 import com.hudhud.repository.ClientRepository;
@@ -12,13 +12,18 @@ import com.hudhud.repository.SmsCountRepository;
 import com.hudhud.repository.SmsRepository;
 import com.hudhud.service.ClientService;
 import com.hudhud.service.SmsService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -44,10 +49,9 @@ public class SmsController {
 
     private final SmsRepository smsRepository;
 
+    private final JwtConfig jwtConfig;
+
     private final SmsCountRepository smsCountRepository;
-
-//    private final SmppService smppService;
-
 
     //        private final SmsCountRepository smsCountRepository;
     private final PackageRepository packageRepository;
@@ -64,13 +68,13 @@ public class SmsController {
         Long count = smsService.getSmsCount(clientId, startDateTime, endDateTime);
 
         var response = new CustomResponse();
-        response.setStatus("200");
+        response.setStatus(200);
         response.setMessage("Message count : " + count);
         return new ResponseEntity<>(response, HttpStatus.OK);
     }
 
     @GetMapping("/sms/client/{clientId}")
-    public ResponseEntity<?> getSmsByClient(@PathVariable String clientId) throws CustomException {
+    public ResponseEntity<?> getSmsByClient(@PathVariable Long clientId) throws CustomException {
         List<Sms> smsByClientId = smsService.getSmsByClientId(clientId);
         return new ResponseEntity<>(smsByClientId, HttpStatus.OK);
     }
@@ -182,130 +186,101 @@ public class SmsController {
 
     // single sms
     @PostMapping(value = "/send-sms", produces = "application/json")
-    public ResponseEntity<?> sendSms(@RequestBody SmsDTO smsDTO) throws InterruptedException, JSONException, ExecutionException {
-        log.info("SMS REQUEST: {}", smsDTO);
-        // Load credentials from the database based on the provided username
-        Optional<Client> client = clientRepository.findClientByUsername(smsDTO.getUsername());
+    public ResponseEntity<?> sendSms(@RequestBody SmsDTO smsDTO, HttpServletRequest request) throws InterruptedException, JSONException, ExecutionException {
 
-        if (!client.isPresent()) {
-            var response = new JSONObject();
-            response.put("status", "404");
-            response.put("message", "Invalid username");
-            return new ResponseEntity<>(response.toString(), HttpStatus.NOT_FOUND);
-        }
+        String loggedInUsername = request.getUserPrincipal().getName();
+
+        // Load credentials from the database based on the provided username
+        Optional<Client> client = clientRepository.findClientByUsername(loggedInUsername);
+
 
         String senderId = client.get().getSenderId();
 
-        if (client != null && client.get().getPassword().equals(smsDTO.getPassword())) {
-
-            if (client.get().getActive() == 0) {
-                var response = new JSONObject();
-                response.put("status", "400");
-                response.put("message", "Client is deactivated cannot send SMS , please contact your system admin");
-                return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
-            }
-            Optional<Packages> packageById = packageRepository.findById(client.get().getPackageId());
-//            SmsCount smsCount = smsCountRepository.findByClient(client);
-//            if (smsCount == null) {
-//                smsCount = new SmsCount();
-//                smsCount.setClient(client.get());
-//                smsCount.setDate(LocalDateTime.now());
-//                smsCount.setCount(1);
-//            } else {
-//                smsCount.setCount(smsCount.getCount() + 1);
-//                if (smsCount.getCount() >= packageById.get().getNumber() + 1 && packageById.get().getType().equals("limited")) {
-//                    var response = new JSONObject();
-//                    response.put("status", "400");
-//                    response.put("message", "You have finished your package , please subscribe new package and enjoy !");
-//                    return new ResponseEntity<>(response.toString(), HttpStatus.BAD_REQUEST);
-//                }
-//            }
-//            smsCountRepository.save(smsCount);
+        var response = new JSONObject();
 
 
-//            new Application().sendTextMessage(senderId, smsDTO.getMessage(), smsDTO.getReceiverAddress());
-//            var response = new JSONObject();
-//            response.put("status", "200");
-//            response.put("message", "Success");
-
-            CompletableFuture<Integer> integerCompletableFuture = smsService.sendSmsAsync(smsDTO.getUsername(), smsDTO.getReceiverAddress(), smsDTO.getMessage());
-
-            var response = new JSONObject();
-
-            if (integerCompletableFuture.get() == 202) {
-                response.put("status", "200");
-                response.put("message", "success");
-
-            } else {
-                response.put("status", "400");
-                response.put("message", "Error occurred while sending message to gateway");
-            }
-
-//            var sms = new Sms();
-//            sms.setClientId(client.get().getId().toString());
-//            sms.setDate(LocalDateTime.now());
-//            sms.setReceiverAddress(smsDTO.getReceiverAddress());
-//            sms.setMessage(smsDTO.getMessage());
-//            sms.setSent(1);
-//            clientService.saveSMS(sms);
-
-            return new ResponseEntity<>(response.toString(), HttpStatus.OK);
-        } else {
-            // Handle authentication failure
-            JSONObject response = new JSONObject();
-            response.put("status", "401");
-            response.put("message", "Authentication credentials not found or invalid");
-            return new ResponseEntity<>(response, HttpStatus.UNAUTHORIZED);
+        if (client.get().getStatus() == 0) {
+            response.put("status", "400");
+            response.put("message", "Client is deactivated cannot send SMS , please contact your system admin");
+            return new ResponseEntity<>(response.toString(), HttpStatus.BAD_REQUEST);
         }
+
+        CompletableFuture<Integer> integerCompletableFuture = smsService.sendSmsAsync(loggedInUsername, smsDTO.getReceiverAddress(), smsDTO.getMessage());
+
+
+        if (integerCompletableFuture.get() == 202) {
+
+            response.put("status", "200");
+            response.put("message", "success");
+
+        } else {
+            response.put("status", "400");
+            response.put("message", "Error occurred while sending message to gateway");
+        }
+
+//        var sms = new Sms();
+//        sms.setClientId(client.get().getId());
+//        sms.setDate(LocalDateTime.now());
+//        sms.setReceiverAddress(smsDTO.getReceiverAddress());
+//        sms.setMessage(smsDTO.getMessage());
+//        sms.setSent(1);
+//        clientService.saveSMS(sms);
+
+        return new ResponseEntity<>(response.toString(), HttpStatus.OK);
+
     }
 
     // bulk sms
     // TODO: 12/13/2023  max 12 digit , min 9, either 09 , 251 , 9 validation
-    @PostMapping("/bulk")
+    @PostMapping(value = "/bulk")
     public ResponseEntity<?> uploadExcelFile(@RequestParam("file") MultipartFile file,
-                                             @RequestParam("username") String username,
-                                             @RequestParam("password") String password) {
+                                             @RequestPart("message") String message,
+                                             HttpServletRequest request
+
+    ) {
+
+        String loggedInUsername = request.getUserPrincipal().getName();
+
+
+        Optional<Client> client = clientRepository.findClientByUsername(loggedInUsername);
+
         var response = new CustomResponse();
 
-        Optional<Client> client = clientRepository.findClientByUsername(username);
-
-        if (!client.isPresent()) {
-            response.setStatus("404");
-            response.setMessage("Invalid username");
-            return new ResponseEntity<>(response, HttpStatus.NOT_FOUND);
+        if (file.isEmpty()) {
+            response.setStatus(400);
+            response.setMessage("please upload a file");
+            return ResponseEntity.badRequest().body(response);
         }
-
-        if (client != null && client.get().getPassword().equals(password)) {
-            if (file.isEmpty()) {
-                response.setStatus("400");
-                response.setMessage("please upload a file");
-                return ResponseEntity.badRequest().body(response);
-            }
-
-            if (!smsService.hasExcelFormat(file)) {
-                response.setStatus("400");
-                response.setMessage("Invalid format please upload excel file");
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
-            }
-            try {
-                smsService.save(file);
-                response.setStatus("200");
-                response.setMessage("Uploaded the file successfully : " + file.getOriginalFilename());
-
-                return ResponseEntity.status(HttpStatus.OK).body(response);
-            } catch (Exception e) {
-
-                response.setStatus("500");
-                response.setMessage("Failed to upload: " + e.getMessage());
-                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
-            }
-        } else {
-            // Handle authentication failure
-            response.setStatus("401");
-            response.setMessage("Authentication credentials not found or invalid");
-            return new ResponseEntity<>(response, HttpStatus.UNAUTHORIZED);
+        if (!smsService.hasExcelFormat(file)) {
+            response.setStatus(400);
+            response.setMessage("Invalid format please upload excel file");
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
         }
+        try {
 
+            Long clientId = client.get().getId();
 
+            smsService.save(file, message, clientId);
+            response.setStatus(200);
+            response.setMessage("Uploaded the file successfully : " + file.getOriginalFilename());
+
+            return ResponseEntity.status(HttpStatus.OK).body(response);
+        } catch (Exception e) {
+
+            response.setStatus(500);
+            response.setMessage("Failed to upload: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+        }
     }
+
+//    @GetMapping("/sms/dlr")
+//    public String handleDeliveryReport(
+//            @RequestParam("dlr") String dlr,
+//            @RequestParam("phone") String phone,
+//            @RequestParam("msgid") String msgid,
+//            @RequestParam("status") String status) {
+//
+//        smsService.saveDeliveryReport(dlr, phone, msgid, status);
+//        return "OK";
+//    }
 }

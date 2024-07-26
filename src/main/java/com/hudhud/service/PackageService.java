@@ -47,7 +47,7 @@ public class PackageService {
                     existingPackage.setNumber(packageRequest.getNumber());
                     packageRepository.save(existingPackage);
                     var response = new CustomResponse();
-                    response.setStatus("200");
+                    response.setStatus(200);
                     response.setMessage("Package updated successfully");
                     return response;
                 })

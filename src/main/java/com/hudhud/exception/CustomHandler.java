@@ -1,16 +1,14 @@
 package com.hudhud.exception;
 
-import org.springframework.http.server.ServerHttpRequest;
-import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.reactive.result.method.annotation.ResponseEntityExceptionHandler;
 
 import java.time.LocalDateTime;
 
 @ControllerAdvice
-public class CustomHandler extends ResponseEntityExceptionHandler {
+public class CustomHandler {
 
     @ExceptionHandler(CustomException.class)
     public ResponseEntity<ApiError> customException(CustomException e) {
@@ -22,7 +20,7 @@ public class CustomHandler extends ResponseEntityExceptionHandler {
                 LocalDateTime.now()
         );
 
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+        return ResponseEntity.status(HttpStatusCode.valueOf(400))
                 .body(errorResponse);
     }
 }

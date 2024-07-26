@@ -1,4 +1,13 @@
-package com.sahay.DTO;
+package com.hudhud.model.dto;
 
-public record SlackRequest(String message , String url) {
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+
+@Data
+@AllArgsConstructor
+public class SlackRequest {
+
+    private String message;
+    private String url;
 }

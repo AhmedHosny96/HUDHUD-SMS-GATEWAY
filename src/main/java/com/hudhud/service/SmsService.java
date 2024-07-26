@@ -1,29 +1,34 @@
 package com.hudhud.service;
 
 import com.hudhud.exception.CustomException;
-import com.hudhud.model.Client;
-import com.hudhud.model.Sms;
-import com.hudhud.model.SmsCount;
-import com.hudhud.repository.ClientRepository;
-import com.hudhud.repository.PackageRepository;
-import com.hudhud.repository.SmsCountRepository;
-import com.hudhud.repository.SmsRepository;
+import com.hudhud.model.*;
+import com.hudhud.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -46,6 +51,9 @@ public class SmsService {
     private final ClientService clientService;
 
 
+    private final DeliveryReportRepo deliveryReportRepo;
+
+
     static String SHEET = "Sheet1";
     public static String TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -59,55 +67,57 @@ public class SmsService {
 
     private final SmsCountRepository smsCountRepository;
 
-    private final PackageRepository packageRepository;
 
-    private final String[] whiteListedClients = {"phuAgjlu", "mPReYLee", ""};
+    private final KannelRepository kannelRepository;
+
+    private final String[] whiteListedClients = {"phuAgjlu", "mPReYLee", "zQwtOBcQ"}; // knNhqNYb : halapay 1. 2. sahay 3. hijra bank
+
+
+    // delivery report
 
     // TODO : FORWARD SMS TO KANNEL GATEWAY
     public CompletableFuture<Integer> sendSmsAsync(String username, String destination, String message) {
-
         boolean reachableViaPing = monitoringService.isReachableViaPing(IPADDRESS);
-
-//        if (reachableViaPing)
-        log.info("SMS-KANNEL REACHABLE : {}", reachableViaPing);
         if (!reachableViaPing) {
             // Notify Slack
             monitoringService.sendToSlack(":warning: SMS KANNEL NETWORK IS UNREACHABLE");
-            // Throw an exception or return a specific value
-            // You can customize this based on your requirements
             throw new RuntimeException("SMS KANNEL NETWORK IS UNREACHABLE");
         }
 
-        Client client = clientRepository.findClientByUsername(username).get();
+        Client client = clientRepository.findClientByUsername(username).orElseThrow(() -> new RuntimeException("Client not found"));
+
         String from = client.getSenderId();
 
-        // count
+        // Check if the client is whitelisted
         if (Arrays.asList(whiteListedClients).contains(username)) {
-            // increment count for that client
+            // Increment count for the client
             incrementCountForClient(client.getId());
             log.info("CLIENT COUNT INCREMENTED : {}", client.getId());
         } else {
+            // Save only for non-whitelisted clients
             var sms = new Sms();
-            sms.setClientId(String.valueOf(client.getId()));
+            sms.setClientId(client.getId());
             sms.setDate(LocalDateTime.now());
             sms.setReceiverAddress(destination);
             sms.setMessage(message);
             sms.setSent(1);
             clientService.saveSMS(sms);
         }
-        // save
+
+        // Send SMS for all clients
         return CompletableFuture.supplyAsync(() -> {
             try {
-                // Replace spaces in message with %20
-                String encodedMessage = message.replaceAll(" ", "%20");
+                // Encode each query parameter
+                String encodedMessage = URLEncoder.encode(message, StandardCharsets.UTF_8);
+                String encodedFrom = URLEncoder.encode(from, StandardCharsets.UTF_8);
+                String encodedDestination = URLEncoder.encode(destination, StandardCharsets.UTF_8);
 
-                // Concatenate the URL parameters without encoding
-                String params = "username=" + USERNAME +
-                        "&password=" + PASSWORD +
-                        "&from=" + from +
-                        "&to=" + destination +
+                // Concatenate the URL parameters
+                String params = "username=" + URLEncoder.encode(USERNAME, StandardCharsets.UTF_8) +
+                        "&password=" + URLEncoder.encode(PASSWORD, StandardCharsets.UTF_8) +
+                        "&from=" + encodedFrom +
+                        "&to=" + encodedDestination +
                         "&text=" + encodedMessage;
-
 
                 String endpoint = URL + "?" + params;
 
@@ -117,8 +127,12 @@ public class SmsService {
                         .build();
 
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-                log.info("SMS KANNEL RESPONSE : {}", response);
                 log.info("Response Code: {}", response.statusCode());
+
+                if (response.statusCode() != 202) {
+                    // notify to slack
+                    monitoringService.sendToSlack("🚨 URGENT SMS KANNEL HAS ERROR 🚨");
+                }
 
                 return response.statusCode();
             } catch (Exception e) {
@@ -126,6 +140,38 @@ public class SmsService {
                 throw new RuntimeException("Failed to send SMS", e);
             }
         }, executorService);
+    }
+
+    @Scheduled(fixedRate = 1000L)
+    protected void sendPendingSms() {
+        Page<Sms> pendingSmsPage = smsRepository.findBySentOrderByIdDesc(0, PageRequest.of(0, 10)); // Fetches 50 unsent SMS
+
+        pendingSmsPage.forEach(sms -> {
+            if (sms.getClientId() != null) {
+                try {
+                    Long clientId = Long.valueOf(sms.getClientId());
+                    String username = getUsernameByClient(clientId);
+                    log.info("PENDING SMS : {}", sms);
+                    sendSmsAsync(username, sms.getReceiverAddress(), sms.getMessage());
+
+                    // Update the status to 'sent'
+                    sms.setSent(1);
+                    smsRepository.save(sms);
+                } catch (NumberFormatException e) {
+                    log.error("Failed to parse clientId: {}, Error: {}", sms.getClientId(), e.getMessage());
+                }
+            } else {
+                log.warn("Invalid or missing clientId for SMS: {}", sms);
+            }
+        });
+    }
+
+
+    @Transactional
+    public void incrementKannelCount() {
+        Kannel kannel = kannelRepository.findById(1L).orElseThrow(() -> new RuntimeException("Kannel entity not found"));
+        kannel.setTotalCount(kannel.getTotalCount() + 1);
+        kannelRepository.save(kannel);
     }
 
     // increment client sms
@@ -155,7 +201,7 @@ public class SmsService {
         return smsCountByClientIdAndDateBetween;
     }
 
-    public List<Sms> getSmsByClientId(String clientId) throws CustomException {
+    public List<Sms> getSmsByClientId(Long clientId) throws CustomException {
 
         List<Sms> byClientId = smsRepository.findByClientId(clientId);
 
@@ -164,40 +210,6 @@ public class SmsService {
         }
         return byClientId;
     }
-
-    //
-    public SmsCount getSmsCountById(Long clientId) throws CustomException {
-        Client client = clientRepository.findById(clientId).get();
-        SmsCount byClientId = smsCountRepository.findByClientId(clientId);
-        if (byClientId == null) {
-            throw new CustomException("No sms found for this client");
-        }
-        return byClientId;
-    }
-
-
-//    @Transactional(propagation = Propagation.REQUIRED)
-//    @Scheduled(fixedDelay = 1000, initialDelay = 1000)
-//    void processPendingSms() {
-//        List<Sms> pendingSmsList = smsRepository.findPendingSms();
-//        if (!pendingSmsList.isEmpty()) {
-//            Sms sms = pendingSmsList.get(0); // Get the first pending SMS
-//            try {
-//                Optional<Client> senderId = clientRepository.findById(Long.valueOf(sms.getClientId()));
-//                if (senderId.isPresent()) {
-//                    log.info("SENDER ID: {}", senderId.get().getSenderId());
-//                    log.info("SMS PAYLOAD: {}", sms);
-//                    new ApplsendTextMessage(senderId.get().getSenderId(), sms.getMessage(), sms.getReceiverAddress());
-//                } else {
-//                    log.error("Client not found for SMS ID: {}", sms.getId());
-//                }
-//            } catch (Exception e) {
-//                log.error("Error sending SMS ID: {}", sms.getId(), e);
-//            }
-//        }
-//    }
-
-    // asychronous processing
 
 
     // excel format checker
@@ -209,44 +221,33 @@ public class SmsService {
     }
 
     // bulk sms
-    public static List<Sms> processExcelFile(InputStream is) {
-        try {
-            Workbook workbook = new XSSFWorkbook(is);
-
+    public static List<Sms> processExcelFile(InputStream is, String message, Long clientId) {
+        final String SHEET = "Sheet1"; // Ensure this matches the name of your sheet
+        try (Workbook workbook = new XSSFWorkbook(is)) {
             Sheet sheet = workbook.getSheet(SHEET);
             Iterator<Row> rows = sheet.iterator();
 
-            List<Sms> tutorials = new ArrayList<>();
+            List<Sms> smsList = new ArrayList<>();
             int rowNumber = 0;
             while (rows.hasNext()) {
                 Row currentRow = rows.next();
-                // skip header
+                // Skip header row
                 if (rowNumber == 0) {
                     rowNumber++;
                     continue;
                 }
-                Iterator<Cell> cellsInRow = currentRow.iterator();
 
+                Iterator<Cell> cellsInRow = currentRow.iterator();
                 Sms sms = new Sms();
 
                 int cellIdx = 0;
                 while (cellsInRow.hasNext()) {
                     Cell currentCell = cellsInRow.next();
 
-                    switch (cellIdx) {
-                        case 0:
-                            if (currentCell.getCellType() == CellType.NUMERIC) {
-                                sms.setClientId(String.valueOf((long) currentCell.getNumericCellValue()));
-                            } else if (currentCell.getCellType() == CellType.STRING) {
-                                sms.setClientId(currentCell.getStringCellValue());
-                            }
-                            break;
-                        case 1:
-                            sms.setMessage(currentCell.getStringCellValue());
-                            sms.setDate(LocalDateTime.now());
-                            break;
+                    if (currentCell.getCellType() == CellType.BLANK) continue;
 
-                        case 2:
+                    switch (cellIdx) {
+                        case 0: // Receiver Address
                             if (currentCell.getCellType() == CellType.NUMERIC) {
                                 sms.setReceiverAddress(String.valueOf((long) currentCell.getNumericCellValue()));
                             } else if (currentCell.getCellType() == CellType.STRING) {
@@ -254,35 +255,47 @@ public class SmsService {
                             }
                             break;
                         default:
-                            sms.setSent(0);
                             break;
                     }
                     cellIdx++;
                 }
-
-                tutorials.add(sms);
+                sms.setMessage(message);
+                sms.setClientId(clientId);
+                sms.setDate(LocalDateTime.now());
+                sms.setSent(0); // Default sent status
+                smsList.add(sms);
             }
-            workbook.close();
-
-            return tutorials;
+            return smsList;
         } catch (IOException e) {
             throw new RuntimeException("fail to parse Excel file: " + e.getMessage());
         }
     }
 
-    public void save(MultipartFile file) {
+
+    @Transactional
+    public void save(MultipartFile file, String message, Long clientId) {
         try {
-            List<Sms> tutorials = processExcelFile(file.getInputStream());
+            List<Sms> tutorials = processExcelFile(file.getInputStream(), message, clientId);
             smsRepository.saveAll(tutorials);
         } catch (IOException e) {
             throw new RuntimeException("fail to store excel data: " + e.getMessage());
         }
     }
 
-    // process sms list , message and phone number
+    public String getUsernameByClient(Long clientId) {
+        Client client = clientRepository.findById(clientId).get();
 
+        return client.getUsername();
+    }
 
-//
+    public Long getClientIdByUsername(String username) {
+        Client client = clientRepository.findClientByUsername(username).get();
+
+        return client.getId();
+    }
+
+    // sms monthly report
+
 }
 
 

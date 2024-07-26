@@ -1,6 +1,8 @@
 package com.hudhud.repository;
 
 import com.hudhud.model.Sms;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -14,16 +16,25 @@ import java.util.List;
 @Repository
 public interface SmsRepository extends JpaRepository<Sms, Long> {
 
-    @Query("SELECT COUNT(m) FROM Sms m WHERE m.clientId = :clientId AND m.date BETWEEN :startDate AND :endDate")
-    long countByClientIdAndDateBetween(
-            @Param("clientId") Long clientId,
-            @Param("startDate") LocalDateTime startDate,
-            @Param("endDate") LocalDateTime endDate
-    );
-    List<Sms> findByClientId(String clientId);
+//    @Query("SELECT COUNT(m) FROM Sms m WHERE m.clientId = :clientId AND m.date BETWEEN :startDate AND :endDate")
+//    long countByClientIdAndDateBetween(
+//            @Param("clientId") Long clientId,
+//            @Param("startDate") LocalDateTime startDate,
+//            @Param("endDate") LocalDateTime endDate
+//    );
 
-    @Query(value = "SELECT TOP 50 * FROM Sms s WHERE s.sent = 0 ORDER BY s.date DESC", nativeQuery = true)
-    List<Sms> findPendingSms();
+    @Query(value = "SELECT COUNT(id) FROM Sms where clientId = :clientId ", nativeQuery = true)
+    long countByClientId(Long clientId);
+    
+    List<Sms> findSmsByClientId(Long clientId);
+
+    void deleteByClientId(Long clientId);
+
+//    @Query(value = "SELECT TOP 50 * FROM Sms s WHERE s.sent = 0 ORDER BY s.date DESC", nativeQuery = true)
+//    List<Sms> findPendingSms();
+
+
+    Page<Sms> findBySentOrderByIdDesc(int status, Pageable pageable);
 
     @Modifying
     @Query(value = "UPDATE Sms SET sent = 1 WHERE id = :smsId", nativeQuery = true)
@@ -31,4 +42,7 @@ public interface SmsRepository extends JpaRepository<Sms, Long> {
     void markSmsAsSent(@Param("smsId") Long smsId);
 
     Sms findTopBySentOrderByIdAsc(int sent);
+
+
+    List<Sms> findByClientId(Long clientId);
 }

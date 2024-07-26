@@ -16,8 +16,8 @@ import java.net.InetAddress;
 @RequiredArgsConstructor
 public class MonitoringService {
 
-    @Value("${slack.webhook-url}")
-    private String SLACK_URL;
+    //    @Value("${slack.webhook-url}")
+    private String SLACK_URL = "https://hooks.slack.com/services/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";
 
     private final RestTemplate restTemplate;
 

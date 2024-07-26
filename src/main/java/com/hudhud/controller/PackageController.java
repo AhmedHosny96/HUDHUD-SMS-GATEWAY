@@ -30,7 +30,7 @@ public class PackageController {
     public ResponseEntity<?> createPackage(@RequestBody Packages packageRequest) throws CustomException {
         Packages aPackage = packageService.createPackage(packageRequest);
         var customResponse = new CustomResponse();
-        customResponse.setStatus("200");
+        customResponse.setStatus(200);
         customResponse.setMessage("Package Successfully Created");
         return new ResponseEntity<>(customResponse, HttpStatus.OK);
 

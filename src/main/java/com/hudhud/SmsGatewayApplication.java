@@ -5,6 +5,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
 @EnableAsync
@@ -12,6 +14,11 @@ import org.springframework.web.client.RestTemplate;
 @SpringBootApplication
 public class SmsGatewayApplication {
 
+
+//    @Scheduled(cron = "0 51 17 * * *")
+//    public void testScheduler() {
+//        System.out.println("TEST SCHEDULER KICKED OFF");
+//    }
 
     @Bean
     public RestTemplate restTemplate() {
