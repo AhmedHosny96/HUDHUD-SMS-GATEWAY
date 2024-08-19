@@ -2,17 +2,21 @@ package com.hudhud.service;
 
 import com.hudhud.exception.CustomException;
 import com.hudhud.model.*;
+import com.hudhud.model.dto.ReportSmsCountResp;
+import com.hudhud.model.dto.SmsCountResponse;
 import com.hudhud.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.poi.openxml4j.exceptions.InvalidFormatException;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -24,11 +28,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.text.NumberFormat;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -50,6 +53,9 @@ public class SmsService {
 
     private final ClientService clientService;
 
+    private final NotificationService notificationService;
+
+    private final SmsHistoryRepo smsHistoryRepo;
 
     private final DeliveryReportRepo deliveryReportRepo;
 
@@ -70,12 +76,12 @@ public class SmsService {
 
     private final KannelRepository kannelRepository;
 
-    private final String[] whiteListedClients = {"phuAgjlu", "mPReYLee", "zQwtOBcQ"}; // knNhqNYb : halapay 1. 2. sahay 3. hijra bank
-
+    private final String[] whiteListedClients = {"mPReYLee", "knNhqNYb", "ZKEsRmRU"};
 
     // delivery report
 
     // TODO : FORWARD SMS TO KANNEL GATEWAY
+
     public CompletableFuture<Integer> sendSmsAsync(String username, String destination, String message) {
         boolean reachableViaPing = monitoringService.isReachableViaPing(IPADDRESS);
         if (!reachableViaPing) {
@@ -88,13 +94,17 @@ public class SmsService {
 
         String from = client.getSenderId();
 
-        // Check if the client is whitelisted
+        // Calculate the increment count based on message length
+        int incrementCount = calculateIncrementCount(message);
+
         if (Arrays.asList(whiteListedClients).contains(username)) {
-            // Increment count for the client
-            incrementCountForClient(client.getId());
+            for (int i = 0; i < incrementCount; i++) {
+                incrementCountForClient(client.getId());
+
+            }
             log.info("CLIENT COUNT INCREMENTED : {}", client.getId());
         } else {
-            // Save only for non-whitelisted clients
+//                    for (int i = 0; i < incrementCount; i++) {
             var sms = new Sms();
             sms.setClientId(client.getId());
             sms.setDate(LocalDateTime.now());
@@ -103,6 +113,9 @@ public class SmsService {
             sms.setSent(1);
             clientService.saveSMS(sms);
         }
+
+        incrementCountHistory(client.getId(), incrementCount);
+
 
         // Send SMS for all clients
         return CompletableFuture.supplyAsync(() -> {
@@ -117,7 +130,9 @@ public class SmsService {
                         "&password=" + URLEncoder.encode(PASSWORD, StandardCharsets.UTF_8) +
                         "&from=" + encodedFrom +
                         "&to=" + encodedDestination +
-                        "&text=" + encodedMessage;
+                        "&text=" + encodedMessage +
+                        "&charset=" + "UTF-8" +
+                        "&coding=" + 2;
 
                 String endpoint = URL + "?" + params;
 
@@ -129,11 +144,6 @@ public class SmsService {
                 HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
                 log.info("Response Code: {}", response.statusCode());
 
-                if (response.statusCode() != 202) {
-                    // notify to slack
-                    monitoringService.sendToSlack("🚨 URGENT SMS KANNEL HAS ERROR 🚨");
-                }
-
                 return response.statusCode();
             } catch (Exception e) {
                 log.error("Failed to send SMS: {}", e.getMessage(), e);
@@ -142,7 +152,47 @@ public class SmsService {
         }, executorService);
     }
 
-    @Scheduled(fixedRate = 1000L)
+
+    @Transactional(propagation = Propagation.REQUIRED, readOnly = false)
+    public void incrementCountHistory(Long clientId, int count) {
+        LocalDate today = LocalDate.now();
+        SmsHistory smsHistory = smsHistoryRepo.findByClientIdAndDate(clientId, today)
+                .orElseGet(() -> {
+                    SmsHistory newHistory = new SmsHistory();
+                    newHistory.setClientId(clientId);
+                    newHistory.setDate(today);
+                    newHistory.setCount(Long.valueOf(count));
+                    return newHistory;
+                });
+
+        smsHistory.setCount(smsHistory.getCount() + count);
+
+        smsHistoryRepo.save(smsHistory);
+    }
+
+    private int calculateIncrementCount(String message) {
+        int messageLengthInBytes = message.getBytes(StandardCharsets.UTF_8).length;
+
+        int count;
+
+        if (containsAmharicText(message)) {
+            // Divide by 70 if the message contains Amharic text
+            count = (int) Math.ceil(messageLengthInBytes / 70.0);
+        } else {
+            // Divide by 140 otherwise
+            count = (int) Math.ceil(messageLengthInBytes / 140.0);
+        }
+
+        log.info("COUNT :{}", count);
+        return count;
+    }
+
+    public boolean containsAmharicText(String text) {
+        // Check if the string contains any Amharic characters
+        return text.matches(".*[\\u1200-\\u137F].*");
+    }
+
+    //    @Scheduled(fixedRate = 1000L)
     protected void sendPendingSms() {
         Page<Sms> pendingSmsPage = smsRepository.findBySentOrderByIdDesc(0, PageRequest.of(0, 10)); // Fetches 50 unsent SMS
 
@@ -192,6 +242,7 @@ public class SmsService {
         }
         smsCountRepository.save(smsCount);
     }
+
 
     public Long getSmsCount(Long clientId, LocalDateTime startDate, LocalDateTime endDate) {
 //        long result = smsRepository.countByClientIdAndDateBetween(clientId, startDate, endDate);
@@ -294,7 +345,126 @@ public class SmsService {
         return client.getId();
     }
 
-    // sms monthly report
+
+    // get sms count by day
+    public SmsCountResponse getSmsCount(LocalDate date) {
+        List<SmsHistory> byDate = smsHistoryRepo.findByDate(date);
+
+        if (byDate.isEmpty()) {
+            return SmsCountResponse.builder()
+                    .status(200)
+                    .message(String.format("No data found for date %s", date))
+                    .smsCount(List.of())
+                    .build();
+        }
+
+        return SmsCountResponse.builder()
+                .status(200)
+                .message("success")
+                .smsCount(byDate)
+                .build();
+
+    }
+
+
+    public ReportSmsCountResp getDetailedReport(LocalDate startDate, LocalDate endDate) {
+
+        List<SmsHistory> byDateBetween = smsHistoryRepo.findByDateBetween(startDate, endDate);
+
+
+        if (byDateBetween.isEmpty()) {
+            return ReportSmsCountResp.builder()
+                    .status(200)
+                    .message(String.format("No data found for dates between %s %s", startDate, endDate))
+                    .smsCounts(List.of())
+                    .build();
+        }
+
+        long sum = byDateBetween.stream()
+                .mapToLong(SmsHistory::getCount)
+                .sum();
+
+        return ReportSmsCountResp.builder()
+                .status(200)
+                .message("success")
+                .totalSms(sum)
+                .startDate(startDate)
+                .endDate(endDate)
+                .smsCounts(byDateBetween)
+                .build();
+
+
+    }
+
+    // send daily reports to slack
+
+    @Scheduled(cron = "0 0 0 * * ?")
+    public void generateDailyReport() {
+        LocalDate yesterday = LocalDate.now().minusDays(1);
+        List<SmsHistory> yesterdayRecords = smsHistoryRepo.findByDate(yesterday);
+
+        StringBuilder reportBuilder = new StringBuilder();
+        reportBuilder.append("<!channel> Daily SMS Report for ").append(yesterday).append(":\n");
+        reportBuilder.append("```\n");  // Start of fixed-width block
+        reportBuilder.append(String.format("%-20s | %-15s | %-10s\n",
+                "Client Name", "Total Sms", "Date"));
+        reportBuilder.append("-------------------- | --------------- | ----------\n");
+
+        NumberFormat numberFormat = NumberFormat.getNumberInstance(Locale.US);
+
+        for (SmsHistory record : yesterdayRecords) {
+            String clientName = clientRepository.findById(record.getClientId()).get().getSenderId();
+            String formattedCount = numberFormat.format(record.getCount());  // Format count with commas
+            reportBuilder.append(String.format("%-20s | %-15s | %-10s\n",
+                    clientName,  // Client name
+                    formattedCount,
+                    record.getDate()
+            ));
+        }
+
+        reportBuilder.append("```\n");  // End of fixed-width block
+
+        String report = reportBuilder.toString();
+
+        log.info("SENDING SLACK REPORT: {}", report);
+        notificationService.sendToSlack(report);
+    }
+
+    @Scheduled(cron = "0 0 0 1 * ?")
+    public void generateMonthlySummaryReport() {
+        LocalDate startOfMonth = LocalDate.now().minusMonths(1).withDayOfMonth(1);
+        LocalDate endOfMonth = startOfMonth.withDayOfMonth(startOfMonth.lengthOfMonth());
+
+        List<SmsHistory> monthlyRecords = smsHistoryRepo.findByDateBetween(startOfMonth, endOfMonth);
+
+        // Sum the counts per client
+        Map<Long, Long> clientTotalCounts = new HashMap<>();
+        for (SmsHistory record : monthlyRecords) {
+            clientTotalCounts.merge(record.getClientId(), record.getCount(), Long::sum);
+        }
+
+        StringBuilder reportBuilder = new StringBuilder();
+        reportBuilder.append("<!channel> Monthly SMS Summary Report for ").append(startOfMonth.getMonth()).append(":\n");
+        reportBuilder.append("```\n");  // Start of fixed-width block
+        reportBuilder.append(String.format("%-20s | %-10s\n", "Client Name", "Total Sms"));
+        reportBuilder.append("-------------------- | ----------\n");
+
+        for (Map.Entry<Long, Long> entry : clientTotalCounts.entrySet()) {
+            String clientName = clientRepository.findById(entry.getKey()).get().getSenderId();
+            reportBuilder.append(String.format("%-20s | %-10d\n",
+                    clientName,
+                    entry.getValue()
+            ));
+        }
+
+        reportBuilder.append("```\n");  // End of fixed-width block
+
+        String report = reportBuilder.toString();
+
+        log.info("SENDING SLACK MONTHLY SUMMARY REPORT: {}", report);
+        notificationService.sendToSlack(report);
+    }
+
 
 }
 

@@ -4,11 +4,17 @@ import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.IContext;
 import org.thymeleaf.spring6.SpringTemplateEngine;
@@ -30,10 +36,15 @@ public class NotificationService {
 //
 //    private final As asyncHttp;
 
+    @Value("${slack.webhook-url}")
+    private String SLACK_WEBHOOK;
+
     private final JavaMailSender mailSender;
 
     private final SpringTemplateEngine templateEngine;
-    
+
+    private final RestTemplate restTemplate;
+
     @Async
     public CompletableFuture<Void> sendMail(String toEmail, String subject, String templateName, IContext context) {
         MimeMessage mimeMessage = mailSender.createMimeMessage();
@@ -72,4 +83,16 @@ public class NotificationService {
 //        return smsResponse;
 //
 //    }
+
+    // slack reporting push
+    public ResponseEntity<String> sendToSlack(String message) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        JSONObject payload = new JSONObject();
+        payload.put("text", message);
+        HttpEntity<String> entity = new HttpEntity<>(payload.toString(), headers);
+        ResponseEntity<String> stringResponseEntity = restTemplate.postForEntity(SLACK_WEBHOOK, entity, String.class);
+        return stringResponseEntity;
+    }
 }

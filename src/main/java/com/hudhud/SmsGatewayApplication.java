@@ -2,6 +2,8 @@ package com.hudhud;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
+import org.springframework.boot.autoconfigure.sql.init.SqlInitializationAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -11,7 +13,8 @@ import org.springframework.web.client.RestTemplate;
 
 @EnableAsync
 @EnableScheduling
-@SpringBootApplication
+@SpringBootApplication(exclude = SqlInitializationAutoConfiguration.class)
+//@SpringBootApplication(exclude = {DataSourceAutoConfiguration.class})
 public class SmsGatewayApplication {
 
 
