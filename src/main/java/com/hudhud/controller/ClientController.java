@@ -51,14 +51,15 @@ public class ClientController {
         return new ResponseEntity<>(customResponse, HttpStatus.OK);
     }
 
-    @PutMapping("client/deactivate/{clientId}")
-    public ResponseEntity<?> registerClient(@PathVariable Long clientId, @RequestBody StatusDTO statusDTO) throws Exception {
+    @PutMapping("client/status/{clientId}")
+    public ResponseEntity<?> updateClientStatus(@PathVariable Long clientId, @RequestParam Boolean activate) throws Exception {
 
-        log.info("STATUS :{}", statusDTO.getStatus());
-        clientService.deactivateClient(clientId, statusDTO.getStatus());
-        var customResponse = new CustomResponse();
+
+        clientService.updateClientStatus(clientId, activate);
+
+        CustomResponse customResponse = new CustomResponse();
         customResponse.setStatus(200);
-        customResponse.setMessage("Client status changed successfully");
+        customResponse.setMessage(String.format("Client status changed to %s successfully", activate ? "active" : "inactive"));
         return new ResponseEntity<>(customResponse, HttpStatus.OK);
     }
 

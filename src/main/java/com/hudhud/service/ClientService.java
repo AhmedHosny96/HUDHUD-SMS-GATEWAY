@@ -94,19 +94,12 @@ public class ClientService {
         return client;
     }
 
-    // function to deactivate clients
-    public void deactivateClient(Long clientId, String status) throws CustomException {
-        Optional<Client> optionalClient = clientRepository.findById(clientId);
-        if (!optionalClient.isPresent()) {
-            throw new CustomException("Client doesn't exist");
-        }
+    // client status change
+    public void updateClientStatus(Long clientId, boolean activate) throws CustomException {
+        Client client = clientRepository.findById(clientId)
+                .orElseThrow(() -> new CustomException("Client doesn't exist"));
 
-        Client client = optionalClient.get();
-        if ("active".equals(status)) { // Use .equals() for string comparison
-            client.setStatus(1);
-        } else {
-            client.setStatus(0);
-        }
+        client.setStatus(activate ? 1 : 0);
         clientRepository.save(client);
     }
 

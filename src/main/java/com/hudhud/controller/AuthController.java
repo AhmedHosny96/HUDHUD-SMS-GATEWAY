@@ -1,11 +1,13 @@
 package com.hudhud.controller;
 
 import com.hudhud.config.JwtConfig;
+import com.hudhud.exception.CustomException;
 import com.hudhud.model.dto.AuthRequestDto;
 import com.hudhud.model.dto.AuthResponse;
 import com.hudhud.model.dto.TokenBody;
 import com.hudhud.repository.ClientRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -30,19 +32,24 @@ public class AuthController {
 
     private final AuthenticationManager authenticationManager;
 
+    @SneakyThrows
     @PostMapping(value = "/login")
     public ResponseEntity<?> auth(@RequestBody AuthRequestDto authRequest) {
         var authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(
                 authRequest.username(), authRequest.password()
+
         ));
+
+
+        var currentUser = userRepository.findClientByUsername(authRequest.username()).get();
+
+        if (currentUser.getStatus() == 0) {
+            throw new CustomException("Client deactivated please contact your service provider");
+        }
 
         if (!authentication.isAuthenticated()) {
             throw new UsernameNotFoundException("invalid username or password");
         }
-
-        // add role , agentId , status to token
-
-        var currentUser = userRepository.findClientByUsername(authRequest.username()).get();
 
         var tokenBody = new TokenBody(currentUser.getUsername(), currentUser.getId(), currentUser.getStatus());
 
@@ -55,6 +62,7 @@ public class AuthController {
                 token
         );
         return new ResponseEntity<>(customResponse, HttpStatus.OK);
+
 
     }
 }

@@ -4,8 +4,7 @@ import com.hudhud.config.JwtConfig;
 import com.hudhud.exception.CustomException;
 import com.hudhud.model.Client;
 import com.hudhud.model.Sms;
-import com.hudhud.model.dto.CustomResponse;
-import com.hudhud.model.dto.SmsDTO;
+import com.hudhud.model.dto.*;
 import com.hudhud.repository.ClientRepository;
 import com.hudhud.repository.PackageRepository;
 import com.hudhud.repository.SmsCountRepository;
@@ -56,22 +55,22 @@ public class SmsController {
     //        private final SmsCountRepository smsCountRepository;
     private final PackageRepository packageRepository;
 
-    @GetMapping("/sms/count")
-    public ResponseEntity<?> getSmsCount(
-            @RequestParam("clientId") Long clientId,
-            @RequestParam("startDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam("endDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-
-        LocalDateTime startDateTime = startDate.atStartOfDay();
-        LocalDateTime endDateTime = endDate.atTime(LocalTime.MAX);
-
-        Long count = smsService.getSmsCount(clientId, startDateTime, endDateTime);
-
-        var response = new CustomResponse();
-        response.setStatus(200);
-        response.setMessage("Message count : " + count);
-        return new ResponseEntity<>(response, HttpStatus.OK);
-    }
+//    @GetMapping("/sms/count")
+//    public ResponseEntity<?> getSmsCount(
+//            @RequestParam("clientId") Long clientId,
+//            @RequestParam("startDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+//            @RequestParam("endDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+//
+//        LocalDateTime startDateTime = startDate.atStartOfDay();
+//        LocalDateTime endDateTime = endDate.atTime(LocalTime.MAX);
+//
+//        Long count = smsService.getSmsCount(clientId, startDateTime, endDateTime);
+//
+//        var response = new CustomResponse();
+//        response.setStatus(200);
+//        response.setMessage("Message count : " + count);
+//        return new ResponseEntity<>(response, HttpStatus.OK);
+//    }
 
     @GetMapping("/sms/client/{clientId}")
     public ResponseEntity<?> getSmsByClient(@PathVariable Long clientId) throws CustomException {
@@ -188,6 +187,8 @@ public class SmsController {
     @PostMapping(value = "/send-sms", produces = "application/json")
     public ResponseEntity<?> sendSms(@RequestBody SmsDTO smsDTO, HttpServletRequest request) throws InterruptedException, JSONException, ExecutionException {
 
+        var response = new JSONObject();
+
         String loggedInUsername = request.getUserPrincipal().getName();
 
         // Load credentials from the database based on the provided username
@@ -196,14 +197,11 @@ public class SmsController {
 
         String senderId = client.get().getSenderId();
 
-        var response = new JSONObject();
-
-
-        if (client.get().getStatus() == 0) {
-            response.put("status", "400");
-            response.put("message", "Client is deactivated cannot send SMS , please contact your system admin");
-            return new ResponseEntity<>(response.toString(), HttpStatus.BAD_REQUEST);
-        }
+//        if (client.get().getStatus() == 0) {
+//            response.put("status", "400");
+//            response.put("message", "Client is deactivated cannot send SMS , please contact your system admin");
+//            return new ResponseEntity<>(response.toString(), HttpStatus.BAD_REQUEST);
+//        }
 
         CompletableFuture<Integer> integerCompletableFuture = smsService.sendSmsAsync(loggedInUsername, smsDTO.getReceiverAddress(), smsDTO.getMessage());
 
@@ -218,13 +216,6 @@ public class SmsController {
             response.put("message", "Error occurred while sending message to gateway");
         }
 
-//        var sms = new Sms();
-//        sms.setClientId(client.get().getId());
-//        sms.setDate(LocalDateTime.now());
-//        sms.setReceiverAddress(smsDTO.getReceiverAddress());
-//        sms.setMessage(smsDTO.getMessage());
-//        sms.setSent(1);
-//        clientService.saveSMS(sms);
 
         return new ResponseEntity<>(response.toString(), HttpStatus.OK);
 
@@ -271,6 +262,32 @@ public class SmsController {
             response.setMessage("Failed to upload: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
         }
+    }
+
+    // todo : report apis
+
+
+    @GetMapping("/sms/count")
+    public ResponseEntity<?> getAllSmsCount(@RequestParam LocalDate date) {
+
+        SmsCountResponse smsCount = smsService.getSmsCount(date);
+
+        return ResponseEntity.status(smsCount.getStatus()).body(smsCount);
+    }
+
+    @GetMapping("/sms/count/{clientId}")
+    public ResponseEntity<?> getClientCount(@PathVariable Long clientId, @RequestParam LocalDate startDate, @RequestParam LocalDate endDate) {
+        SmsCountDetail clientSmsCountSum = smsService.getClientSmsCountSum(clientId, startDate, endDate);
+
+        return ResponseEntity.status(clientSmsCountSum.getStatus()).body(clientSmsCountSum);
+    }
+
+    @GetMapping("/sms/count-report")
+    public ResponseEntity<?> getDetailedSmsReport(@RequestParam LocalDate startDate, @RequestParam LocalDate endDate) {
+
+        ReportSmsCountResp detailedReport = smsService.getDetailedReport(startDate, endDate);
+
+        return ResponseEntity.status(detailedReport.getStatus()).body(detailedReport);
     }
 
 //    @GetMapping("/sms/dlr")

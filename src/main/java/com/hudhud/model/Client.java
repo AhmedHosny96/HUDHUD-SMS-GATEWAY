@@ -30,7 +30,6 @@ public class Client {
     @NotEmpty
     @Size(min = 6, max = 20)
     private String username;
-    // You can generate a password using some logic or a library here
     private String password;
     private int status;
     private boolean isPremium;

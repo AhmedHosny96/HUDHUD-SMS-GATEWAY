@@ -3,17 +3,17 @@ package com.hudhud.service;
 import com.hudhud.exception.CustomException;
 import com.hudhud.model.*;
 import com.hudhud.model.dto.ReportSmsCountResp;
+import com.hudhud.model.dto.SmsCountDetail;
 import com.hudhud.model.dto.SmsCountResponse;
 import com.hudhud.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -35,6 +35,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -82,6 +83,7 @@ public class SmsService {
 
     // TODO : FORWARD SMS TO KANNEL GATEWAY
 
+    @SneakyThrows
     public CompletableFuture<Integer> sendSmsAsync(String username, String destination, String message) {
         boolean reachableViaPing = monitoringService.isReachableViaPing(IPADDRESS);
         if (!reachableViaPing) {
@@ -91,6 +93,11 @@ public class SmsService {
         }
 
         Client client = clientRepository.findClientByUsername(username).orElseThrow(() -> new RuntimeException("Client not found"));
+
+
+        if (client.getStatus() == 0) {
+            throw new CustomException("Client deactivated please contact your service provider");
+        }
 
         String from = client.getSenderId();
 
@@ -192,7 +199,7 @@ public class SmsService {
         return text.matches(".*[\\u1200-\\u137F].*");
     }
 
-    //    @Scheduled(fixedRate = 1000L)
+    @Scheduled(fixedRate = 1000L)
     protected void sendPendingSms() {
         Page<Sms> pendingSmsPage = smsRepository.findBySentOrderByIdDesc(0, PageRequest.of(0, 10)); // Fetches 50 unsent SMS
 
@@ -201,7 +208,7 @@ public class SmsService {
                 try {
                     Long clientId = Long.valueOf(sms.getClientId());
                     String username = getUsernameByClient(clientId);
-                    log.info("PENDING SMS : {}", sms);
+                    log.info("PENDING BULK SMS : {}", sms);
                     sendSmsAsync(username, sms.getReceiverAddress(), sms.getMessage());
 
                     // Update the status to 'sent'
@@ -348,9 +355,9 @@ public class SmsService {
 
     // get sms count by day
     public SmsCountResponse getSmsCount(LocalDate date) {
-        List<SmsHistory> byDate = smsHistoryRepo.findByDate(date);
+        List<SmsHistory> smsHistories = smsHistoryRepo.findByDate(date);
 
-        if (byDate.isEmpty()) {
+        if (smsHistories.isEmpty()) {
             return SmsCountResponse.builder()
                     .status(200)
                     .message(String.format("No data found for date %s", date))
@@ -358,21 +365,32 @@ public class SmsService {
                     .build();
         }
 
+        List<SmsCountDetail> smsCountDetails = smsHistories.stream().map(smsHistory -> {
+            String clientName = clientRepository.findById(smsHistory.getClientId())
+                    .map(Client::getSenderId) // Assuming you have a Client entity with a getName() method
+                    .orElse("Unknown Client");
+
+            return SmsCountDetail.builder()
+                    .clientId(smsHistory.getClientId())
+                    .clientName(clientName)
+                    .totalCount(smsHistory.getCount())
+                    .date(smsHistory.getDate())
+                    .build();
+        }).collect(Collectors.toList());
+
         return SmsCountResponse.builder()
                 .status(200)
                 .message("success")
-                .smsCount(byDate)
+                .smsCount(smsCountDetails)
                 .build();
-
     }
 
 
     public ReportSmsCountResp getDetailedReport(LocalDate startDate, LocalDate endDate) {
 
-        List<SmsHistory> byDateBetween = smsHistoryRepo.findByDateBetween(startDate, endDate);
+        List<SmsHistory> smsHistories = smsHistoryRepo.findByDateBetween(startDate, endDate);
 
-
-        if (byDateBetween.isEmpty()) {
+        if (smsHistories.isEmpty()) {
             return ReportSmsCountResp.builder()
                     .status(200)
                     .message(String.format("No data found for dates between %s %s", startDate, endDate))
@@ -380,20 +398,58 @@ public class SmsService {
                     .build();
         }
 
-        long sum = byDateBetween.stream()
-                .mapToLong(SmsHistory::getCount)
+        Map<Long, Long> clientSmsCounts = smsHistories.stream()
+                .collect(Collectors.groupingBy(SmsHistory::getClientId, Collectors.summingLong(SmsHistory::getCount)));
+
+        // Create the SmsCountDetail list
+        List<SmsCountDetail> smsCountDetails = clientSmsCounts.entrySet().stream()
+                .map(entry -> {
+                    Long clientId = entry.getKey();
+                    Long totalCount = entry.getValue();
+                    String clientName = clientRepository.findById(clientId)
+                            .map(Client::getSenderId) // Assuming you have a Client entity with a getName() method
+                            .orElse("Unknown Client");
+
+                    return SmsCountDetail.builder()
+                            .clientId(clientId)
+                            .clientName(clientName)
+                            .totalCount(totalCount)
+                            .build();
+                }).collect(Collectors.toList());
+
+        long totalSum = smsCountDetails.stream()
+                .mapToLong(SmsCountDetail::getTotalCount)
                 .sum();
 
         return ReportSmsCountResp.builder()
                 .status(200)
                 .message("success")
-                .totalSms(sum)
+                .totalSms(totalSum)
                 .startDate(startDate)
                 .endDate(endDate)
-                .smsCounts(byDateBetween)
+                .smsCounts(smsCountDetails)
                 .build();
+    }
 
 
+    public SmsCountDetail getClientSmsCountSum(Long clientId, LocalDate startDate, LocalDate endDate) {
+        List<SmsHistory> smsHistories = smsHistoryRepo.findByClientIdAndDateBetween(clientId, startDate, endDate);
+
+        long totalCount = smsHistories.stream()
+                .mapToLong(SmsHistory::getCount)
+                .sum();
+
+        String clientName = clientRepository.findById(clientId)
+                .map(Client::getSenderId)
+                .orElse("Unknown Client");
+
+        return SmsCountDetail.builder()
+                .status(200)
+                .message("success")
+                .clientId(clientId)
+                .clientName(clientName)
+                .totalCount(totalCount)
+                .build();
     }
 
     // send daily reports to slack

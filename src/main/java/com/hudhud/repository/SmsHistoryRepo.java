@@ -19,4 +19,7 @@ public interface SmsHistoryRepo extends JpaRepository<SmsHistory, Long> {
 
 
     Optional<List<SmsHistory>> findByClientId(Long clientId);
+
+    List<SmsHistory> findByClientIdAndDateBetween(Long clientId, LocalDate startDate, LocalDate endDate);
+
 }

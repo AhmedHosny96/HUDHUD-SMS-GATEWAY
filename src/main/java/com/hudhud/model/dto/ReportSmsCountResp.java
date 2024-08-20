@@ -16,5 +16,5 @@ public class ReportSmsCountResp {
     private LocalDate startDate;
     private LocalDate endDate;
     private Long totalSms;
-    private List<SmsHistory> smsCounts;
+    private List<SmsCountDetail> smsCounts;
 }

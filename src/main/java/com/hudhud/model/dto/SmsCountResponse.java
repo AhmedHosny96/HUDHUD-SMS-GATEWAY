@@ -12,5 +12,4 @@ public class SmsCountResponse {
 
     private int status;
     private String message;
-    private List<SmsHistory> smsCount;
-}
+    private List<SmsCountDetail> smsCount;}
